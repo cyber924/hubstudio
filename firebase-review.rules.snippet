@@ -1,0 +1,11 @@
+// Existing services/cloud.firestore/match /databases/{database}/documents block INSIDE:
+// Merge this rule into existing contentProjects rules. Do NOT replace all rules.
+match /contentProjects/{projectId} {
+  allow read, delete: if request.auth != null
+    && resource.data.ownerId == request.auth.uid;
+  allow create: if request.auth != null
+    && request.resource.data.ownerId == request.auth.uid;
+  allow update: if request.auth != null
+    && resource.data.ownerId == request.auth.uid
+    && request.resource.data.ownerId == request.auth.uid;
+}

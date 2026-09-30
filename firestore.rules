@@ -1,0 +1,85 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        request.auth.token.email in [
+          'cyber924@naver.com',
+          'cyber924@gmail.com'
+        ];
+    }
+
+    function ownsExisting() {
+      return signedIn() &&
+        resource.data.ownerId == request.auth.uid;
+    }
+
+    function ownsIncoming() {
+      return signedIn() &&
+        request.resource.data.ownerId == request.auth.uid;
+    }
+
+    function isLegacyDocument() {
+      return !('ownerId' in resource.data);
+    }
+
+    // 이미지 허브의 이미지는 누구나 조회할 수 있습니다.
+    match /images/{imageId} {
+      allow read: if true;
+      allow create: if ownsIncoming();
+      allow update: if ownsIncoming() &&
+        (ownsExisting() || (isAdmin() && isLegacyDocument()));
+      allow delete: if ownsExisting() || isAdmin();
+    }
+
+    // 공개 프롬프트는 조회 가능하고 수정은 소유자만 가능합니다.
+    match /prompts/{promptId} {
+      allow read: if true;
+      allow create: if ownsIncoming();
+      allow update: if ownsExisting() && ownsIncoming();
+      allow delete: if ownsExisting() || isAdmin();
+    }
+
+    match /shortsProjects/{shortsId} {
+      allow read: if
+        resource.data.visibility == 'public' ||
+        ownsExisting() ||
+        isAdmin();
+      allow create: if ownsIncoming();
+      allow update: if ownsExisting() && ownsIncoming();
+      allow delete: if ownsExisting() || isAdmin();
+    }
+
+    // 기존 데이터 호환용 비공개 프로젝트 컬렉션입니다.
+    match /contentProjects/{projectId} {
+      allow create: if ownsIncoming();
+      allow read: if ownsExisting() || isAdmin();
+      allow update: if ownsExisting() && ownsIncoming();
+      allow delete: if ownsExisting() || isAdmin();
+    }
+
+    // 허브스튜디오는 저장과 동시에 공개 게시물로 기록합니다.
+    match /publishedContents/{contentId} {
+      allow read: if true;
+      allow create: if signedIn();
+      allow update, delete: if ownsExisting() || isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read, create, update: if
+        signedIn() && request.auth.uid == userId;
+      allow delete: if
+        (signedIn() && request.auth.uid == userId) || isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
