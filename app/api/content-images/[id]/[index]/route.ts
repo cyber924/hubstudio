@@ -1,14 +1,13 @@
 import {firestoreDocuments, firestoreKey, documentField} from "../../../../lib/review-auth";
+import {getPublicContent} from "../../../../lib/public-content";
 export const runtime = "nodejs";
 export async function GET(_request: Request, {params}: {params: Promise<{id:string;index:string}>}) {
   const {id,index}=await params;
   if (!/^[\w-]{1,128}$/.test(id)||!/^\d{1,3}$/.test(index)) return new Response("Not found",{status:404});
   try {
-    const articleResponse=await fetch(`${firestoreDocuments}/publishedContents/${id}?key=${firestoreKey}`,{cache:"no-store"});
-    if(!articleResponse.ok)return new Response("Not found",{status:404});
-    const article:any=await articleResponse.json(),fields=article.fields||{};
-    if(documentField(fields,"visibility")!=="public")return new Response("Not found",{status:404});
-    const imageId=fields.imageIds?.arrayValue?.values?.[Number(index)]?.stringValue;
+    const article=await getPublicContent(id);
+    if(!article)return new Response("Not found",{status:404});
+    const imageId=article.imageIds[Number(index)];
     if(!imageId)return new Response("Not found",{status:404});
     const imageResponse=await fetch(`${firestoreDocuments}/images/${encodeURIComponent(imageId)}?key=${firestoreKey}`,{cache:"no-store"});
     if(!imageResponse.ok)return new Response("Image unavailable",{status:404});
