@@ -3,13 +3,14 @@ import ContentBody from "../../ContentBody";
 import ExportButton from "./ExportButton";
 import ReadingProgress from "./ReadingProgress";
 import ContentTables from "../../ContentTables";
-import type {Metadata} from "next";import {notFound} from "next/navigation";import PrintButton from "./PrintButton";
+import type {Metadata} from "next";import {notFound,redirect} from "next/navigation";import PrintButton from "./PrintButton";
 import {getPublicContent} from '../../lib/public-content';
 import {contentSchema} from '../../lib/content-schema';
 const SITE=siteOrigin();
 export const dynamic='force-dynamic';
 export async function generateMetadata({params}:{params:Promise<{id:string}>}):Promise<Metadata>{
  const {id}=await params,p=await getPublicContent(id);if(!p)return {title:'콘텐츠를 찾을 수 없습니다',robots:{index:false,follow:true}};
+ if(p.sourceUrl)return {title:p.title,description:p.content?.description||p.title,alternates:{canonical:p.sourceUrl},robots:{index:false,follow:true}};
  const description=String(p.content.description||p.content.intro||p.title).slice(0,320),url=`${SITE}/content/${encodeURIComponent(id)}`;
  return {title:`${p.title} | 허브스튜디오`,description,alternates:{canonical:url},robots:{index:true,follow:true,'max-image-preview':'large'},openGraph:{type:'article',url,title:p.title,description,...(p.publishedAt?{publishedTime:p.publishedAt}:{}),...(p.updatedAt?{modifiedTime:p.updatedAt}:{}),images:p.imageUrls[0]?[`${SITE}${p.imageUrls[0]}`]:[]},twitter:{card:'summary_large_image',title:p.title,description,images:p.imageUrls[0]?[`${SITE}${p.imageUrls[0]}`]:[]}};
 }
@@ -45,4 +46,4 @@ function Report({p}:{p:any}) {
   </article><footer>HUB STUDIO INSIGHT REPORT</footer></main>;
 }
 function Blog({p}:{p:any}){const img=(n:number)=>p.imageUrls[n]||null;return <main className="public-article"><header><a href="/">HUB STUDIO</a><span>JOURNAL</span><ExportButton ownerId={p.ownerId}/></header><article><p className="pub-kicker">CURATED STORY · {p.keyword}</p><h1 title={p.title}>{p.title}</h1><div className="pub-intro"><ContentBody body={p.content.intro}/></div>{img(0)&&<img className="pub-hero" src={img(0)!} alt={p.title}/>}<div className="pub-body">{p.content.sections?.map((s:any,i:number)=><section key={s.heading}><h2>{s.heading}</h2><ContentBody body={s.body} blocks={s.blocks}/>{img(s.imageIndex??i+1)&&<figure><img src={img(s.imageIndex??i+1)!} alt={s.caption||s.heading}/>{s.caption&&<figcaption>{s.caption}</figcaption>}</figure>}</section>)}<ContentTables tables={p.content.tables}/><blockquote>{p.content.closing}</blockquote>{p.content.faq?.length>0&&<section className="pub-faq"><h2>자주 묻는 질문</h2>{p.content.faq.map((q:any)=><div key={q.question}><h3>{q.question}</h3><p>{q.answer}</p></div>)}</section>}<div className="pub-tags">{p.content.tags?.map((t:string)=><span key={t}>#{t}</span>)}</div></div></article><footer><b>HUB STUDIO</b><p>이미지에서 시작해 콘텐츠로 완성합니다.</p><a href="/">더 많은 이야기 보기</a></footer></main>}
-export default async function ContentPage({params}:{params:Promise<{id:string}>}){const{id}=await params,p=await getPublicContent(id);if(!p)notFound();const schema=contentSchema(p,SITE);return <><script type="application/ld+json" dangerouslySetInnerHTML={{__html:JSON.stringify(schema).replace(/</g,"\\u003c")}}/>{p.type==="product"?<Product p={p}/>:p.type==="ebook"?<Ebook p={p}/>:p.type==="report"?<Report p={p}/>:<Blog p={p}/>}</>}
+export default async function ContentPage({params}:{params:Promise<{id:string}>}){const{id}=await params,p=await getPublicContent(id);if(!p)notFound();if(p.sourceUrl)redirect(p.sourceUrl);const schema=contentSchema(p,SITE);return <><script type="application/ld+json" dangerouslySetInnerHTML={{__html:JSON.stringify(schema).replace(/</g,"\\u003c")}}/>{p.type==="product"?<Product p={p}/>:p.type==="ebook"?<Ebook p={p}/>:p.type==="report"?<Report p={p}/>:<Blog p={p}/>}</>}

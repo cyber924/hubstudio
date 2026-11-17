@@ -1,3 +1,4 @@
+import {legacyHub6Content} from "./legacy-public-content";
 /** Read compatibility only: never changes the original Firestore document. */
 export function publicKeyword(value: unknown, fallback = ""): string {
  const text=typeof value==='string'?value.trim():'';
@@ -23,6 +24,15 @@ export function decodePublicContent(doc:any,now=Date.now()):any|null {
  const release=s('publishAt')||s('publishedAt');if(release&&(!Number.isFinite(Date.parse(release))||Date.parse(release)>now))return null;
  let raw:any;try{raw=JSON.parse(s('contentJson')||'{}');}catch{throw new Error('공개 원고 JSON을 확인해주세요: '+doc.name?.split('/').pop());}
  const id=doc.name?.split('/').pop();if(!id)throw new Error('공개 문서 ID가 없습니다.');
+ const meaningful=['sections','chapters','reportSections'].some(key=>Array.isArray(raw[key])&&raw[key].length>0)||[raw.intro,raw.executiveSummary,raw.body,raw.description].some(x=>typeof x==='string'&&x.trim().length>120);
+ if(!meaningful){
+  const archived=legacyHub6Content(id);
+  // Documents without source content must not be presented as complete articles.
+  // Legacy HubStudio6 items link back to their verified, intact original pages.
+  if(!archived)return null;
+  const title=s('title')||'허브6 아카이브';
+  return {id,ownerId:s('ownerId'),type:s('type')==='report'?'report':'blog',sourceType:s('type')||'blog',title,keyword:publicKeyword(s('keyword'),title),tone:s('tone'),status:'published',imageIds:[],imageTitles:[],imageUrls:[archived.coverUrl],content:{description:archived.description,intro:archived.description,sections:[],closing:'',tags:[]},createdAt:s('createdAt'),updatedAt:s('updatedAt'),publishedAt:s('publishAt')||s('publishedAt'),sourceUrl:archived.sourceUrl};
+ }
  let imageIds=a('imageIds');if(!imageIds.length)imageIds=[...new Set((raw.sections||[]).map((r:any)=>r.imageId).filter((x:any)=>typeof x==='string'))] as string[];
  const content=normalizeContent(raw,imageIds),title=s('title')||content.title||'제목 없는 콘텐츠';
  const sourceType=s('type')||'blog',type=['blog','product','ebook','report'].includes(sourceType)?sourceType:'blog';
