@@ -4,14 +4,15 @@ import ExportButton from "./ExportButton";
 import ReadingProgress from "./ReadingProgress";
 import ContentTables from "../../ContentTables";
 import type {Metadata} from "next";import {notFound,redirect} from "next/navigation";import PrintButton from "./PrintButton";
-import {getPublicContent} from '../../lib/public-content';
+import {getPublicContent,getPublicContents} from '../../lib/public-content';
+import './editorial.css';
 import {contentSchema} from '../../lib/content-schema';
 const SITE=siteOrigin();
 export const dynamic='force-dynamic';
 export async function generateMetadata({params}:{params:Promise<{id:string}>}):Promise<Metadata>{
  const {id}=await params,p=await getPublicContent(id);if(!p)return {title:'콘텐츠를 찾을 수 없습니다',robots:{index:false,follow:true}};
  if(p.sourceUrl)return {title:p.title,description:p.content?.description||p.title,alternates:{canonical:p.sourceUrl},robots:{index:false,follow:true}};
- const description=String(p.content.description||p.content.intro||p.title).slice(0,320),url=`${SITE}/content/${encodeURIComponent(id)}`;
+ const description=String(p.content.description||p.content.intro||p.title).slice(0,165),url=`${SITE}/content/${encodeURIComponent(id)}`;
  return {title:`${p.title} | 허브스튜디오`,description,alternates:{canonical:url},robots:{index:true,follow:true,'max-image-preview':'large'},openGraph:{type:'article',url,title:p.title,description,...(p.publishedAt?{publishedTime:p.publishedAt}:{}),...(p.updatedAt?{modifiedTime:p.updatedAt}:{}),images:p.imageUrls[0]?[`${SITE}${p.imageUrls[0]}`]:[]},twitter:{card:'summary_large_image',title:p.title,description,images:p.imageUrls[0]?[`${SITE}${p.imageUrls[0]}`]:[]}};
 }
 function Product({p}:{p:any}) {
@@ -45,5 +46,89 @@ function Report({p}:{p:any}) {
    <section className="report-evidence" id="report-evidence"><small>EVIDENCE & LIMITATIONS</small><h2>자료와 분석의 한계</h2>{references?<><h3>사용자가 제공한 자료</h3><ContentBody body={references}/></>:<p>별도의 참고 자료가 제공되지 않았습니다. 이 보고서는 입력한 주제와 목적을 바탕으로 만든 기획·검토안입니다.</p>}{c.evidenceNote&&<ContentBody body={c.evidenceNote}/>}<ul>{(limitations.length?limitations:["외부 자료와 수치의 사실 확인은 별도로 진행해야 합니다.","실행 전에 실제 상품 정보와 운영 조건을 확인해주세요."]).map((x:string,i:number)=><li key={i}>{x}</li>)}</ul></section><div className="document-closing"><ContentBody body={c.closing}/></div>
   </article><footer>HUB STUDIO INSIGHT REPORT</footer></main>;
 }
-function Blog({p}:{p:any}){const img=(n:number)=>p.imageUrls[n]||null;return <main className="public-article"><header><a href="/">HUB STUDIO</a><span>JOURNAL</span><ExportButton ownerId={p.ownerId}/></header><article><p className="pub-kicker">CURATED STORY · {p.keyword}</p><h1 title={p.title}>{p.title}</h1><div className="pub-intro"><ContentBody body={p.content.intro}/></div>{img(0)&&<img className="pub-hero" src={img(0)!} alt={p.title}/>}<div className="pub-body">{p.content.sections?.map((s:any,i:number)=><section key={s.heading}><h2>{s.heading}</h2><ContentBody body={s.body} blocks={s.blocks}/>{img(s.imageIndex??i+1)&&<figure><img src={img(s.imageIndex??i+1)!} alt={s.caption||s.heading}/>{s.caption&&<figcaption>{s.caption}</figcaption>}</figure>}</section>)}<ContentTables tables={p.content.tables}/><blockquote>{p.content.closing}</blockquote>{p.content.faq?.length>0&&<section className="pub-faq"><h2>자주 묻는 질문</h2>{p.content.faq.map((q:any)=><div key={q.question}><h3>{q.question}</h3><p>{q.answer}</p></div>)}</section>}<div className="pub-tags">{p.content.tags?.map((t:string)=><span key={t}>#{t}</span>)}</div></div></article><footer><b>HUB STUDIO</b><p>이미지에서 시작해 콘텐츠로 완성합니다.</p><a href="/">더 많은 이야기 보기</a></footer></main>}
-export default async function ContentPage({params}:{params:Promise<{id:string}>}){const{id}=await params,p=await getPublicContent(id);if(!p)notFound();if(p.sourceUrl)redirect(p.sourceUrl);const schema=contentSchema(p,SITE);return <><script type="application/ld+json" dangerouslySetInnerHTML={{__html:JSON.stringify(schema).replace(/</g,"\\u003c")}}/>{p.type==="product"?<Product p={p}/>:p.type==="ebook"?<Ebook p={p}/>:p.type==="report"?<Report p={p}/>:<Blog p={p}/>}</>}
+
+function Blog({p,related=[]}:{p:any;related?:any[]}){
+ const c=p.content||{},images=Array.isArray(p.imageUrls)?p.imageUrls:[],img=(n:number)=>images[n]||null;
+ const sections=Array.isArray(c.sections)?c.sections:[];
+ const published=p.publishedAt||p.updatedAt||"";
+ const publishedLabel=Number.isFinite(Date.parse(published))?new Date(published).toLocaleDateString('ko-KR',{timeZone:'Asia/Seoul'}):'발행일 미표시';
+ const totalLength=String(c.intro||"").length+sections.reduce((n:number,s:any)=>n+String(s.body||"").length,0)+String(c.closing||"").length;
+ const minutes=Math.max(1,Math.ceil(totalLength/600));
+ const summary=String(c.description||"").trim();
+ return <main className="public-article public-article--premium" id="top">
+  <header><a href="/">HUB STUDIO</a><span>HUB6 EDITORIAL JOURNAL</span><ExportButton ownerId={p.ownerId}/></header>
+  <div className="editorial-breadcrumb"><a href="/">허브스튜디오</a><span aria-hidden="true">/</span><a href="/#collection">공개 콘텐츠</a><span aria-hidden="true">/</span><span>전문 블로그</span></div>
+  <div className="editorial-reading-grid">
+   <div className="editorial-reading-main">
+    <article className="editorial-reading-article">
+     <p className="pub-kicker">HUB STUDIO · JOURNAL</p>
+     <h1 title={p.title}>{p.title}</h1>
+     <div className="editorial-byline"><span>HUB STUDIO EDITORIAL</span><span>{publishedLabel}</span><span>읽는 시간 약 {minutes}분</span></div>
+     {summary&&<section className="editorial-abstract" aria-label="기사 요약"><span>ARTICLE SUMMARY</span><h2>한눈에 보는 기사</h2><p>{summary}</p><div><small>{sections.length}개 주요 주제</small><small>이미지 {images.length}장</small></div></section>}
+     {c.intro&&<div className="pub-intro"><ContentBody body={c.intro}/></div>}
+     {img(0)&&<figure className="editorial-lead-image"><img className="pub-hero" src={img(0)!} alt={p.title} fetchPriority="high"/><figcaption>{p.title}</figcaption></figure>}
+     {sections.length>0&&<nav className="editorial-inline-toc" aria-label="기사 목차"><span>CONTENTS</span><h2>이 글의 목차</h2><div>{sections.map((s:any,i:number)=><a key={i} href={'#article-section-'+(i+1)}><b>{String(i+1).padStart(2,'0')}</b><span>{s.heading||'본문 '+(i+1)}</span></a>)}</div></nav>}
+     <div className="pub-body">
+      {sections.map((s:any,i:number)=><section id={'article-section-'+(i+1)} key={i}>
+       <p className="editorial-section-number">SECTION {String(i+1).padStart(2,'0')}</p>
+       <h2>{s.heading||'본문 '+(i+1)}</h2>
+       <ContentBody body={s.body} blocks={s.blocks}/>
+       {img(s.imageIndex??i+1)&&<figure><img src={img(s.imageIndex??i+1)!} alt={s.caption||s.heading||p.title} loading="lazy" decoding="async"/>{s.caption&&<figcaption>{s.caption}</figcaption>}</figure>}
+       <a href="#top" className="editorial-back-top">맨 위로 ↑</a>
+      </section>)}
+      <ContentTables tables={c.tables}/>
+      {c.closing&&<blockquote><ContentBody body={c.closing}/></blockquote>}
+      {Array.isArray(c.faq)&&c.faq.length>0&&<section className="pub-faq"><h2>자주 묻는 질문</h2>{c.faq.map((q:any,i:number)=><div key={i}><h3>{q.question}</h3><ContentBody body={q.answer}/></div>)}</section>}
+      <div className="pub-tags">{(Array.isArray(c.tags)?c.tags:[]).map((tag:string,i:number)=><span key={i}>#{tag.replace(/^#/,'')}</span>)}</div>
+     </div>
+    </article>
+    {related.length>0&&<section className="editorial-related" aria-label="함께 읽으면 좋은 콘텐츠"><div className="editorial-related-heading"><span>DISCOVER MORE</span><h2>함께 읽으면 좋은 이야기</h2></div><div className="editorial-related-grid">{related.map((item:any)=><a key={item.id} href={'/content/'+encodeURIComponent(item.id)}>{item.imageUrls?.[0]?<img src={item.imageUrls[0]} alt={item.title} loading="lazy"/>:<span className="editorial-related-fallback">HUB6</span>}<div><small>전문 블로그</small><h3>{item.title}</h3></div></a>)}</div></section>}
+   </div>
+   <aside className="editorial-sidebar" aria-label="광고 및 기사 안내">
+    <div className="editorial-sidebar-sticky">
+     <section className="editorial-ad" aria-label="샘플 광고">
+      <span className="editorial-ad-disclosure">광고 · 샘플</span>
+      <div className="editorial-ad-visual" aria-hidden="true"><span className="editorial-ad-logo">H<span>6</span></span><i/><i/><i/></div>
+      <p className="editorial-ad-label">HUB STUDIO · CREATIVE PLATFORM</p>
+      <h2>좋은 이미지를<br/>전문 콘텐츠로.</h2>
+      <p>블로그, 상세페이지, 전자책까지. 나만의 이야기를 더 완성도 있게 제작해 보세요.</p>
+      <a href="/" className="editorial-ad-cta">허브스튜디오 둘러보기 <span aria-hidden="true">↗</span></a>
+      <small>내부 홍보용 디자인 예시 · 외부 광고 미연결</small>
+     </section>
+     {sections.length>0&&<nav className="editorial-sidebar-toc" aria-label="본문 바로가기"><span>QUICK NAVIGATION</span><h2>바로 읽기</h2>{sections.map((s:any,i:number)=><a key={i} href={'#article-section-'+(i+1)}><b>{String(i+1).padStart(2,'0')}</b><span>{s.heading||'본문 '+(i+1)}</span></a>)}</nav>}
+     <a className="editorial-sidebar-more" href="/">다른 공개 작품 보기 <span aria-hidden="true">→</span></a>
+    </div>
+   </aside>
+  </div>
+  <footer><b>HUB STUDIO</b><p>이미지에서 시작해 콘텐츠로 완성합니다.</p><a href="/">더 많은 이야기 보기</a></footer>
+ </main>;
+}
+export default async function ContentPage({params}:{params:Promise<{id:string}>}){
+ const {id}=await params,p=await getPublicContent(id);
+ if(!p)notFound();
+ if(p.sourceUrl)redirect(p.sourceUrl);
+ const schema=contentSchema(p,SITE);
+ let related:any[]=[];
+ if(p.type==="blog"){
+   try{
+     const all=await getPublicContents();
+     related=all.filter((x:any)=>x.id!==id && x.type==='blog' && !x.sourceUrl).slice(0,3);
+   }catch(error){
+     console.warn("Related article lookup unavailable",error instanceof Error?error.message:"fetch failed");
+   }
+ }
+ const breadcrumbs={
+  '@context':'https://schema.org',
+  '@type':'BreadcrumbList',
+  itemListElement:[
+   {'@type':'ListItem',position:1,name:'허브스튜디오',item:SITE},
+   {'@type':'ListItem',position:2,name:'공개 콘텐츠',item:SITE+'/#collection'},
+   {'@type':'ListItem',position:3,name:p.title,item:SITE+'/content/'+encodeURIComponent(id)}
+  ]
+ };
+ return <>
+  <script type="application/ld+json" dangerouslySetInnerHTML={{__html:JSON.stringify(schema).replace(/</g,'\\u003c')}}/>
+  <script type="application/ld+json" dangerouslySetInnerHTML={{__html:JSON.stringify(breadcrumbs).replace(/</g,'\\u003c')}}/>
+  {p.type==="product"?<Product p={p}/>:p.type==="ebook"?<Ebook p={p}/>:p.type==="report"?<Report p={p}/>:<Blog p={p} related={related}/>}
+ </>;
+}
