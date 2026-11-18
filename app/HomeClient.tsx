@@ -91,9 +91,60 @@ export default function Home({initialPublished=[]}:{initialPublished?:Project[]}
  useEffect(()=>{try{const s=localStorage.getItem(AUTH_KEY);if(s)setSession(JSON.parse(s))}catch{}},[]);
  useEffect(()=>{if(view==="studio"&&!imagesLoaded.current){imagesLoaded.current=true;void loadImages()}},[view]);
  useEffect(()=>{if(session&&(view==="studio"||view==="projects"||view==="review"))void loadProjects(session)},[session,view]);
- async function query(collection:string,where?:any,token?:string){const q:any={from:[{collectionId:collection}],limit:200};if(where)q.where=where.fieldFilter||where.compositeFilter?where:{fieldFilter:where};const r=await fetch(`${FIRE}:runQuery?key=${API_KEY}`,{method:"POST",headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify({structuredQuery:q})});if(!r.ok)throw new Error(((await r.json().catch(()=>null)) as any)?.error?.message||"데이터를 불러오지 못했습니다.");return((await r.json()) as any[]).map((x:any)=>x.document).filter(Boolean)}
+ async function query(collection:string,where?:any,s?:Session){
+ const q:any={from:[{collectionId:collection}],limit:200};
+ if(where)q.where=where.fieldFilter||where.compositeFilter?where:{fieldFilter:where};
+ const url=`${FIRE}:runQuery?key=${API_KEY}`,init:RequestInit={method:"POST",headers:{"Content-Type":"application/json"},cache:"no-store",body:JSON.stringify({structuredQuery:q})};
+ const response=s?await authenticatedFetch(url,init,s):await fetch(url,init);
+ if(!response.ok)throw new Error(((await response.json().catch(()=>null)) as any)?.error?.message||`Firestore 조회 오류 (${response.status})`);
+ return ((await response.json()) as any[]).map((row:any)=>row.document).filter(Boolean);
+}
  async function loadImages(){setLoading(true);try{const docs=await query("images"),items=docs.map((d:any)=>({id:d.name.split("/").pop(),url:value(d,"dataUrl")||value(d,"imageUrl")||value(d,"url"),title:value(d,"title")||value(d,"prompt")||"이미지 허브 이미지",tags:value(d,"tags")||[]})).filter((x:HubImage)=>x.url);setImages(items);if(activeMode.current==="blog")setSelected(items.slice(0,2).map((x:HubImage)=>x.id));toast.success(`공개 이미지 ${items.length}장을 불러왔어요.`)}catch(e:any){setImages([]);if(activeMode.current==="blog")setSelected([]);toast.error(`전체 이미지 조회 실패: ${e.message}`)}finally{setLoading(false)}}
- async function loadProjects(s:Session){try{const [docs,draftResponse]=await Promise.all([query("publishedContents",{fieldFilter:{field:{fieldPath:"ownerId"},op:"EQUAL",value:{stringValue:s.localId}}}).catch(e=>{toast.error(`공개 프로젝트 조회 실패: ${e.message}`);return [];}),authenticatedFetch('/api/blog-agent/drafts',{method:'GET'},s)]);const data:any=await draftResponse.json().catch(()=>null);if(!draftResponse.ok)toast.error(data?.error||'발행 대기 초안을 불러오지 못했습니다.');const publicProjects=docs.filter((d:any)=>value(d,"ownerId")===s.localId&&value(d,"type")!=="shorts").flatMap((d:any)=>{try{return[decodeProject(d)]}catch(error){console.warn("프로젝트 데이터 형식 확인 필요",d.name?.split("/").pop());return[]}});const rawDrafts=draftResponse.ok&&Array.isArray(data?.drafts)?data.drafts:[];const safeProjects=[...publicProjects,...rawDrafts].map(normalizeWorkspaceProject).filter((p):p is Project=>p!==null);setProjects(safeProjects.sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||""))))}catch(e:any){if(view==="projects")toast.error(`내 프로젝트 조회 실패: ${e.message}`);else console.warn("프로젝트 조회 지연",e.message)}}
+ async function loadProjects(s:Session){
+ // Existing public data is already server-rendered. Show it without waiting
+ // for unrelated private draft API requests.
+ const cached=published.filter(p=>p.ownerId===s.localId&&true)
+   .map(normalizeWorkspaceProject).filter((p):p is Project=>p!==null);
+ if(cached.length)setProjects(prev=>{
+   const map=new Map(prev.filter(p=>p.ownerId===s.localId).map(p=>[p.id,p]));
+   for(const p of cached)map.set(p.id,p);
+   return [...map.values()].sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
+ });
+ const publishedPromise=(async()=>{
+   try{
+     // Authenticated owner query: supports both complete and older saved projects.
+     const docs=await query("publishedContents",{fieldFilter:{field:{fieldPath:"ownerId"},op:"EQUAL",value:{stringValue:s.localId}}},s);
+     return docs.filter((d:any)=>value(d,"ownerId")===s.localId&&value(d,"type")!=="shorts")
+       .flatMap((d:any)=>{try{const p=normalizeWorkspaceProject(decodeProject(d));return p?[p]:[]}catch(error){console.warn("Skipping invalid personal project",d.name?.split("/").pop());return []}});
+   }catch(error){
+     console.warn("Owner query not available; using public API",error instanceof Error?error.message:"unknown");
+     const response=await fetch("/api/public-contents",{cache:"no-store"});
+     const data:any=await response.json().catch(()=>null);
+     if(!response.ok||!Array.isArray(data?.posts))throw Error("Public API fallback failed");
+     return data.posts.filter((p:Project)=>p.ownerId===s.localId&&true)
+       .map(normalizeWorkspaceProject).filter((p:Project|null):p is Project=>p!==null);
+   }
+ })();
+ const draftsPromise=(async()=>{
+   const response=await authenticatedFetch("/api/blog-agent/drafts",{method:"GET",cache:"no-store"},s);
+   const data:any=await response.json().catch(()=>null);
+   if(!response.ok||!Array.isArray(data?.drafts))throw Error(data?.error||"Draft API unavailable");
+   return data.drafts.filter((p:Project)=>p.ownerId===s.localId)
+     .map(normalizeWorkspaceProject).filter((p:Project|null):p is Project=>p!==null);
+ })();
+ const [publicResult,draftResult]=await Promise.allSettled([publishedPromise,draftsPromise]);
+ // Never throw away successfully loaded articles when the drafts API fails.
+ setProjects(prev=>{
+   const mine=prev.filter(p=>p.ownerId===s.localId);
+   const publicItems=publicResult.status==="fulfilled"?publicResult.value:mine.filter(p=>p.status!=="draft");
+   const draftItems=draftResult.status==="fulfilled"?draftResult.value:mine.filter(p=>p.status==="draft");
+   const map=new Map<string,Project>();
+   for(const p of [...publicItems,...draftItems])map.set(p.id,p);
+   return [...map.values()].sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
+ });
+ if(publicResult.status==="rejected")console.warn("Published project refresh failed; previously loaded records are preserved");
+ if(draftResult.status==="rejected")console.warn("Agent draft refresh failed; published records are preserved");
+}
  async function loadPublished():Promise<void>{
   // The page already has server-rendered public content. Refresh only on demand,
   // and reuse that content if a transient network/Firestore request fails.
@@ -122,7 +173,16 @@ export default function Home({initialPublished=[]}:{initialPublished?:Project[]}
  async function refreshSession(s:Session){if(!s.refreshToken){localStorage.removeItem(AUTH_KEY);setSession(null);setAuthOpen(true);throw new Error("기존 로그인 정보가 만료되었습니다. 한 번만 다시 로그인해주세요.")}const r=await fetch(`https://securetoken.googleapis.com/v1/token?key=${API_KEY}`,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"refresh_token",refresh_token:s.refreshToken})}),d=await r.json() as any;if(!r.ok){localStorage.removeItem(AUTH_KEY);setSession(null);setAuthOpen(true);throw new Error("로그인이 만료되었습니다. 다시 로그인해주세요.")}const next:Session={idToken:d.id_token,localId:d.user_id,email:s.email,refreshToken:d.refresh_token||s.refreshToken,expiresAt:Date.now()+Number(d.expires_in||3600)*1000-60000};localStorage.setItem(AUTH_KEY,JSON.stringify(next));setSession(next);return next}
  async function authenticatedFetch(url:string,init:RequestInit,s:Session){let active=s;if(active.expiresAt&&Date.now()>=active.expiresAt)active=await refreshSession(active);const send=(token:string)=>fetch(url,{...init,headers:{...(init.headers||{}),Authorization:`Bearer ${token}`}});let r=await send(active.idToken);if(r.status===401){active=await refreshSession(active);r=await send(active.idToken)}return r}
  function toggle(id:string){setSelected(p=>p.includes(id)?p.filter(x=>x!==id):p.length<6?[...p,id]:p)}
- async function saveProject(content:Draft,publishNow=true){if(!session)throw new Error("로그인이 필요합니다.");const now=new Date().toISOString(),existing=editingId?projects.find(x=>x.id===editingId):null,storedContent={...content,extra,studioSettings:{audience,purpose,experience,searchMode,instruction,outline,recommendation}},payload={ownerId:session.localId,type:mode,title:content.title||title,keyword:publicKeyword(keyword,content.title||title),tone,status:"published",visibility:"public",imageIds:selected,imageTitles:selected.map(id=>images.find(x=>x.id===id)?.title||id),contentJson:JSON.stringify(storedContent),createdAt:existing?.createdAt||now,updatedAt:now,publishedAt:now};if(existing?.status==='draft'){const response=await authenticatedFetch('/api/blog-agent/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:existing.id,action:publishNow?'publish':'save',content:storedContent,keyword,tone,imageIds:selected,expectedUpdatedAt:existing.updatedAt})},session);const data:any=await response.json();if(!response.ok)throw new Error(data.error||'초안 처리 실패');setEditingId(data.id);setSavedAt(new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}));await Promise.all([loadProjects(session),loadPublished()]);return data.id;}const url=editingId?`${FIRE}/publishedContents/${encodeURIComponent(editingId)}?key=${API_KEY}`:`${FIRE}/publishedContents?key=${API_KEY}`;const r=await authenticatedFetch(url,{method:editingId?"PATCH":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fields(payload))},session);const result:any=await r.json().catch(()=>null);if(!r.ok){const message=result?.error?.message||"원격 DB 저장에 실패했습니다.";throw new Error(`저장 실패(${r.status}): ${message}`)}const id=editingId||result?.name?.split("/").pop();if(!id)throw new Error("저장 문서 ID를 확인하지 못했습니다.");setEditingId(id);setSavedAt(new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"}));await Promise.all([loadProjects(session),loadPublished()]);return id}
+ async function saveProject(content:Draft,publishNow=true){if(!session)throw new Error("로그인이 필요합니다.");const now=new Date().toISOString(),existing=editingId?projects.find(x=>x.id===editingId):null,storedContent={...content,extra,studioSettings:{audience,purpose,experience,searchMode,instruction,outline,recommendation}},payload={ownerId:session.localId,type:mode,title:content.title||title,keyword:publicKeyword(keyword,content.title||title),tone,status:"published",visibility:"public",imageIds:selected,imageTitles:selected.map(id=>images.find(x=>x.id===id)?.title||id),contentJson:JSON.stringify(storedContent),createdAt:existing?.createdAt||now,updatedAt:now,publishedAt:now};if(existing?.status==='draft'){const response=await authenticatedFetch('/api/blog-agent/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:existing.id,action:publishNow?'publish':'save',content:storedContent,keyword,tone,imageIds:selected,expectedUpdatedAt:existing.updatedAt})},session);const data:any=await response.json();if(!response.ok)throw new Error(data.error||'초안 처리 실패');setEditingId(data.id);setSavedAt(new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}));await Promise.all([loadProjects(session),loadPublished()]);return data.id;}const url=editingId?`${FIRE}/publishedContents/${encodeURIComponent(editingId)}?key=${API_KEY}`:`${FIRE}/publishedContents?key=${API_KEY}`;const r=await authenticatedFetch(url,{method:editingId?"PATCH":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fields(payload))},session);const result:any=await r.json().catch(()=>null);if(!r.ok){const message=result?.error?.message||"원격 DB 저장에 실패했습니다.";throw new Error(`저장 실패(${r.status}): ${message}`)}const id=editingId||result?.name?.split("/").pop();if(!id)throw new Error("저장 문서 ID를 확인하지 못했습니다.");const local=normalizeWorkspaceProject({...payload,id,content:storedContent,status:"published",updatedAt:now,publishedAt:now});
+ if(local)setProjects(prev=>{
+  const owned=prev.filter(p=>p.ownerId===session.localId&&p.id!==id);
+  return [...owned,local].sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
+ });
+ setEditingId(id);
+ setSavedAt(new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"}));
+ // A saved record must remain visible even if an unrelated read request fails.
+ await Promise.allSettled([loadProjects(session),loadPublished()]);
+ return id}
  async function saveCurrent(){if(!session)return setAuthOpen(true);if(!draft)return toast.error("먼저 원고를 생성해주세요.");if(!editingId&&draftImageKey&&draftImageKey!==selected.join("|"))return toast.error("이미지 선택이 바뀌었습니다. 새 이미지로 콘텐츠를 다시 생성해주세요.");setSaving(true);try{await saveProject(draft);toast.success("원격 DB에 저장하고 공개했습니다.");setView("projects")}catch(e:any){toast.error(e.message)}finally{setSaving(false)}}
  async function saveDraftCurrent(){if(!session||!draft)return;setSaving(true);try{await saveProject(draft,false);toast.success('초안을 저장했습니다. 내 프로젝트에서 발행할 수 있습니다.');setView('projects')}catch(e:any){toast.error(e.message)}finally{setSaving(false)}}
  async function publishPending(p:Project){if(!session||saving)return;setSaving(true);try{const r=await authenticatedFetch('/api/blog-agent/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:p.id,action:'publish',expectedUpdatedAt:p.updatedAt})},session),d:any=await r.json();if(!r.ok)throw new Error(d.error||'발행 실패');await Promise.all([loadProjects(session),loadPublished()]);toast.success('초안을 공개 발행하고 저장 결과를 확인했습니다.')}catch(e:any){toast.error(e.message)}finally{setSaving(false)}}
