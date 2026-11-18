@@ -14,13 +14,36 @@ type Mode="blog"|"product"|"ebook"|"report";type View="studio"|"projects"|"publi
 type EditorialPlan={titles:string[];keyword:string;relatedTerms:string[];audience:string;purpose:string;style:string;intent:string;outline:string[];imageRoles:{imageId:string;role:string;fits:boolean}[];warnings:string[];visuallyChecked:number};
 type Recommendation={titles:string[];keyword:string;style:string;audience:string;purpose:string;extra:string;outline:string[];instruction:string;warnings:string[]};
 type Draft={tables?:ContentTable[];title:string;subtitle?:string;description:string;intro:string;author?:string;coverImageIndex?:number;tableOfContents?:string[];chapters?:{number:number;title:string;summary:string;body:string;blocks?:ContentBlock[];imageIndex?:number;caption?:string;keyPoints:string[]}[];checklist?:string[];badge?:string;benefits?:string[];sections?:{heading:string;body:string;blocks?:ContentBlock[];imageIndex?:number;caption?:string}[];executiveSummary?:string;purpose?:string;scope?:string;keyFindings?:{title:string;description:string;importance:string}[];reportSections?:{number:number;title:string;body:string;blocks?:ContentBlock[];imageIndex?:number;caption?:string;insights:string[]}[];recommendations?:{priority:string;title:string;description:string}[];closing:string;faq?:{question:string;answer:string}[];tags:string[]};
-type Project={id:string;ownerId:string;type:Mode;title:string;keyword:string;imageUrls?:string[];sourceUrl?:string;tone:string;status:"draft"|"published";imageIds:string[];imageTitles:string[];content:Draft;createdAt:string;updatedAt:string;publishedAt?:string;sourceJob?:string;draftRoot?:string};
+type Project={id:string;ownerId:string;type:Mode;title:string;keyword:string;imageUrls?:string[];sourceUrl?:string;sourceService?:string;tone:string;status:"draft"|"published";imageIds:string[];imageTitles:string[];content:Draft;createdAt:string;updatedAt:string;publishedAt?:string;sourceJob?:string;draftRoot?:string};
 const modes={blog:{label:"블로그",icon:BookOpenText,accent:"#ff5c35",desc:"검색에 잘 보이는 글"},product:{label:"상세페이지",icon:ShoppingBag,accent:"#7357ff",desc:"구매를 부르는 페이지"},ebook:{label:"전자책",icon:BookOpen,accent:"#0787a8",desc:"주제별 전문 가이드"},report:{label:"보고서",icon:BarChart3,accent:"#2463a9",desc:"분석과 실행 전략 문서"}};
 const demos:HubImage[]=[{id:"demo-1",url:"https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=900&q=85",title:"스페셜티 커피",tags:["카페"]},{id:"demo-2",url:"https://images.unsplash.com/photo-1445116572660-236099ec97a0?auto=format&fit=crop&w=900&q=85",title:"햇살 좋은 카페",tags:["공간"]}];
 function value(d:any,k:string){const v=d?.fields?.[k];return v?.stringValue??v?.integerValue??v?.booleanValue??v?.timestampValue??v?.arrayValue?.values?.map((x:any)=>x.stringValue)}
 function fields(data:Record<string,any>){const out:any={fields:{}};for(const[k,v]of Object.entries(data)){if(v===undefined)continue;if(Array.isArray(v))out.fields[k]={arrayValue:{values:v.map(x=>({stringValue:String(x)}))}};else if(typeof v==="boolean")out.fields[k]={booleanValue:v};else out.fields[k]={stringValue:String(v)}}return out}
-function decodeProject(d:any):Project{const f=(k:string)=>value(d,k);return{id:d.name.split("/").pop(),ownerId:f("ownerId"),type:["blog","product","ebook","report"].includes(f("type"))?f("type"):"blog",title:f("title"),keyword:publicKeyword(f("keyword"),f("title")),tone:f("tone"),status:f("status")||"draft",imageIds:f("imageIds")||[],imageTitles:f("imageTitles")||[],content:normalizeContent(JSON.parse(f("contentJson")||"{}"),f("imageIds")||[]),createdAt:f("createdAt"),updatedAt:f("updatedAt"),publishedAt:f("publishedAt")}}
+function decodeProject(d:any):Project{const f=(k:string)=>value(d,k);return{id:d.name.split("/").pop(),ownerId:f("ownerId"),sourceService:f("sourceService"),type:["blog","product","ebook","report"].includes(f("type"))?f("type"):"blog",title:f("title"),keyword:publicKeyword(f("keyword"),f("title")),tone:f("tone"),status:f("status")||"draft",imageIds:f("imageIds")||[],imageTitles:f("imageTitles")||[],content:normalizeContent(JSON.parse(f("contentJson")||"{}"),f("imageIds")||[]),createdAt:f("createdAt"),updatedAt:f("updatedAt"),publishedAt:f("publishedAt")}}
 function demoUrl(id:string){return demos.find(x=>x.id===id)?.url||""}
+
+/**
+ * HubStudio6 and the other Hub-series sites share the Firebase database.
+ * The owner ID identifies the person, not the app that produced an article.
+ * Explicit provenance is authoritative for new documents; historical, untagged
+ * HubStudio6 documents use the IDs and draft metadata created by this app.
+ * Imported Hub3/Hub5/Hub6 archive and other sites must not appear in My Projects.
+ * This is a display filter only; no records are migrated or deleted.
+ */
+function isHubStudio6Project(p:Project):boolean{
+ const origin=String(p.sourceService||"").toLowerCase();
+ if(origin)return origin==="hubstudio6";
+ const id=String(p.id||"");
+ const c:any=p.content||{};
+ const nativeMetadata=!!(c.studioSettings||c.editorialPlan||c.prepublishReview);
+ if(/^agent_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+   return nativeMetadata;
+ if(!/^[A-Za-z0-9]{20}$/.test(id))return false;
+ // The original standalone studio wrote 20-character Firestore auto IDs.
+ // Its early articles predate the cross-Hub import; later ones carry its editor metadata.
+ const earlyNative=typeof p.createdAt==="string"&&Number.isFinite(Date.parse(p.createdAt))&&Date.parse(p.createdAt)<Date.parse("2026-10-02T00:00:00Z");
+ return nativeMetadata||earlyNative;
+}
 
 function normalizeWorkspaceProject(input:any):Project|null{
  if(!input||typeof input!=="object")return null;
@@ -103,10 +126,10 @@ export default function Home({initialPublished=[]}:{initialPublished?:Project[]}
  async function loadProjects(s:Session){
  // Existing public data is already server-rendered. Show it without waiting
  // for unrelated private draft API requests.
- const cached=published.filter(p=>p.ownerId===s.localId&&true)
+ const cached=published.filter(p=>p.ownerId===s.localId&&isHubStudio6Project(p))
    .map(normalizeWorkspaceProject).filter((p):p is Project=>p!==null);
  if(cached.length)setProjects(prev=>{
-   const map=new Map(prev.filter(p=>p.ownerId===s.localId).map(p=>[p.id,p]));
+   const map=new Map(prev.filter(p=>p.ownerId===s.localId&&(p.status==="draft"||isHubStudio6Project(p))).map(p=>[p.id,p]));
    for(const p of cached)map.set(p.id,p);
    return [...map.values()].sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
  });
@@ -115,13 +138,13 @@ export default function Home({initialPublished=[]}:{initialPublished?:Project[]}
      // Authenticated owner query: supports both complete and older saved projects.
      const docs=await query("publishedContents",{fieldFilter:{field:{fieldPath:"ownerId"},op:"EQUAL",value:{stringValue:s.localId}}},s);
      return docs.filter((d:any)=>value(d,"ownerId")===s.localId&&value(d,"type")!=="shorts")
-       .flatMap((d:any)=>{try{const p=normalizeWorkspaceProject(decodeProject(d));return p?[p]:[]}catch(error){console.warn("Skipping invalid personal project",d.name?.split("/").pop());return []}});
+       .flatMap((d:any)=>{try{const p=normalizeWorkspaceProject(decodeProject(d));return p&&isHubStudio6Project(p)?[p]:[]}catch(error){console.warn("Skipping invalid personal project",d.name?.split("/").pop());return []}});
    }catch(error){
      console.warn("Owner query not available; using public API",error instanceof Error?error.message:"unknown");
      const response=await fetch("/api/public-contents",{cache:"no-store"});
      const data:any=await response.json().catch(()=>null);
      if(!response.ok||!Array.isArray(data?.posts))throw Error("Public API fallback failed");
-     return data.posts.filter((p:Project)=>p.ownerId===s.localId&&true)
+     return data.posts.filter((p:Project)=>p.ownerId===s.localId&&isHubStudio6Project(p))
        .map(normalizeWorkspaceProject).filter((p:Project|null):p is Project=>p!==null);
    }
  })();
@@ -135,7 +158,7 @@ export default function Home({initialPublished=[]}:{initialPublished?:Project[]}
  const [publicResult,draftResult]=await Promise.allSettled([publishedPromise,draftsPromise]);
  // Never throw away successfully loaded articles when the drafts API fails.
  setProjects(prev=>{
-   const mine=prev.filter(p=>p.ownerId===s.localId);
+   const mine=prev.filter(p=>p.ownerId===s.localId&&(p.status==="draft"||isHubStudio6Project(p)));
    const publicItems=publicResult.status==="fulfilled"?publicResult.value:mine.filter(p=>p.status!=="draft");
    const draftItems=draftResult.status==="fulfilled"?draftResult.value:mine.filter(p=>p.status==="draft");
    const map=new Map<string,Project>();
@@ -173,7 +196,7 @@ export default function Home({initialPublished=[]}:{initialPublished?:Project[]}
  async function refreshSession(s:Session){if(!s.refreshToken){localStorage.removeItem(AUTH_KEY);setSession(null);setAuthOpen(true);throw new Error("기존 로그인 정보가 만료되었습니다. 한 번만 다시 로그인해주세요.")}const r=await fetch(`https://securetoken.googleapis.com/v1/token?key=${API_KEY}`,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"refresh_token",refresh_token:s.refreshToken})}),d=await r.json() as any;if(!r.ok){localStorage.removeItem(AUTH_KEY);setSession(null);setAuthOpen(true);throw new Error("로그인이 만료되었습니다. 다시 로그인해주세요.")}const next:Session={idToken:d.id_token,localId:d.user_id,email:s.email,refreshToken:d.refresh_token||s.refreshToken,expiresAt:Date.now()+Number(d.expires_in||3600)*1000-60000};localStorage.setItem(AUTH_KEY,JSON.stringify(next));setSession(next);return next}
  async function authenticatedFetch(url:string,init:RequestInit,s:Session){let active=s;if(active.expiresAt&&Date.now()>=active.expiresAt)active=await refreshSession(active);const send=(token:string)=>fetch(url,{...init,headers:{...(init.headers||{}),Authorization:`Bearer ${token}`}});let r=await send(active.idToken);if(r.status===401){active=await refreshSession(active);r=await send(active.idToken)}return r}
  function toggle(id:string){setSelected(p=>p.includes(id)?p.filter(x=>x!==id):p.length<6?[...p,id]:p)}
- async function saveProject(content:Draft,publishNow=true){if(!session)throw new Error("로그인이 필요합니다.");const now=new Date().toISOString(),existing=editingId?projects.find(x=>x.id===editingId):null,storedContent={...content,extra,studioSettings:{audience,purpose,experience,searchMode,instruction,outline,recommendation}},payload={ownerId:session.localId,type:mode,title:content.title||title,keyword:publicKeyword(keyword,content.title||title),tone,status:"published",visibility:"public",imageIds:selected,imageTitles:selected.map(id=>images.find(x=>x.id===id)?.title||id),contentJson:JSON.stringify(storedContent),createdAt:existing?.createdAt||now,updatedAt:now,publishedAt:now};if(existing?.status==='draft'){const response=await authenticatedFetch('/api/blog-agent/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:existing.id,action:publishNow?'publish':'save',content:storedContent,keyword,tone,imageIds:selected,expectedUpdatedAt:existing.updatedAt})},session);const data:any=await response.json();if(!response.ok)throw new Error(data.error||'초안 처리 실패');setEditingId(data.id);setSavedAt(new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}));await Promise.all([loadProjects(session),loadPublished()]);return data.id;}const url=editingId?`${FIRE}/publishedContents/${encodeURIComponent(editingId)}?key=${API_KEY}`:`${FIRE}/publishedContents?key=${API_KEY}`;const r=await authenticatedFetch(url,{method:editingId?"PATCH":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fields(payload))},session);const result:any=await r.json().catch(()=>null);if(!r.ok){const message=result?.error?.message||"원격 DB 저장에 실패했습니다.";throw new Error(`저장 실패(${r.status}): ${message}`)}const id=editingId||result?.name?.split("/").pop();if(!id)throw new Error("저장 문서 ID를 확인하지 못했습니다.");const local=normalizeWorkspaceProject({...payload,id,content:storedContent,status:"published",updatedAt:now,publishedAt:now});
+ async function saveProject(content:Draft,publishNow=true){if(!session)throw new Error("로그인이 필요합니다.");const now=new Date().toISOString(),existing=editingId?projects.find(x=>x.id===editingId):null,storedContent={...content,extra,studioSettings:{audience,purpose,experience,searchMode,instruction,outline,recommendation}},payload={ownerId:session.localId,sourceService:"hubstudio6",type:mode,title:content.title||title,keyword:publicKeyword(keyword,content.title||title),tone,status:"published",visibility:"public",imageIds:selected,imageTitles:selected.map(id=>images.find(x=>x.id===id)?.title||id),contentJson:JSON.stringify(storedContent),createdAt:existing?.createdAt||now,updatedAt:now,publishedAt:now};if(existing?.status==='draft'){const response=await authenticatedFetch('/api/blog-agent/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:existing.id,action:publishNow?'publish':'save',content:storedContent,keyword,tone,imageIds:selected,expectedUpdatedAt:existing.updatedAt})},session);const data:any=await response.json();if(!response.ok)throw new Error(data.error||'초안 처리 실패');setEditingId(data.id);setSavedAt(new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}));await Promise.all([loadProjects(session),loadPublished()]);return data.id;}const url=editingId?`${FIRE}/publishedContents/${encodeURIComponent(editingId)}?key=${API_KEY}`:`${FIRE}/publishedContents?key=${API_KEY}`;const r=await authenticatedFetch(url,{method:editingId?"PATCH":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fields(payload))},session);const result:any=await r.json().catch(()=>null);if(!r.ok){const message=result?.error?.message||"원격 DB 저장에 실패했습니다.";throw new Error(`저장 실패(${r.status}): ${message}`)}const id=editingId||result?.name?.split("/").pop();if(!id)throw new Error("저장 문서 ID를 확인하지 못했습니다.");const local=normalizeWorkspaceProject({...payload,id,content:storedContent,status:"published",updatedAt:now,publishedAt:now});
  if(local)setProjects(prev=>{
   const owned=prev.filter(p=>p.ownerId===session.localId&&p.id!==id);
   return [...owned,local].sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));

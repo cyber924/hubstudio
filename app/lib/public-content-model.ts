@@ -31,10 +31,10 @@ export function decodePublicContent(doc:any,now=Date.now()):any|null {
   // Legacy HubStudio6 items link back to their verified, intact original pages.
   if(!archived)return null;
   const title=s('title')||'허브6 아카이브';
-  return {id,ownerId:s('ownerId'),type:s('type')==='report'?'report':'blog',sourceType:s('type')||'blog',title,keyword:publicKeyword(s('keyword'),title),tone:s('tone'),status:'published',imageIds:[],imageTitles:[],imageUrls:[archived.coverUrl],content:{description:archived.description,intro:archived.description,sections:[],closing:'',tags:[]},createdAt:s('createdAt'),updatedAt:s('updatedAt'),publishedAt:s('publishAt')||s('publishedAt'),sourceUrl:archived.sourceUrl};
+  return {id,ownerId:s('ownerId'),sourceService:s('sourceService'),type:s('type')==='report'?'report':'blog',sourceType:s('type')||'blog',title,keyword:publicKeyword(s('keyword'),title),tone:s('tone'),status:'published',imageIds:[],imageTitles:[],imageUrls:[archived.coverUrl],content:{description:archived.description,intro:archived.description,sections:[],closing:'',tags:[]},createdAt:s('createdAt'),updatedAt:s('updatedAt'),publishedAt:s('publishAt')||s('publishedAt'),sourceUrl:archived.sourceUrl};
  }
  let imageIds=a('imageIds');if(!imageIds.length)imageIds=[...new Set((raw.sections||[]).map((r:any)=>r.imageId).filter((x:any)=>typeof x==='string'))] as string[];
  const content=normalizeContent(raw,imageIds),title=s('title')||content.title||'제목 없는 콘텐츠';
  const sourceType=s('type')||'blog',type=['blog','product','ebook','report'].includes(sourceType)?sourceType:'blog';
- return {id,ownerId:s('ownerId'),type,sourceType,title,keyword:publicKeyword(s('keyword'),title),tone:s('tone'),status:'published',imageIds,imageTitles:a('imageTitles'),imageUrls:imageIds.map((_:string,i:number)=>`/api/content-images/${encodeURIComponent(id)}/${i}`),content,createdAt:s('createdAt'),updatedAt:s('updatedAt')||release,publishedAt:release};
+ return {id,ownerId:s('ownerId'),sourceService:s('sourceService'),type,sourceType,title,keyword:publicKeyword(s('keyword'),title),tone:s('tone'),status:'published',imageIds,imageTitles:a('imageTitles'),imageUrls:imageIds.map((_:string,i:number)=>`/api/content-images/${encodeURIComponent(id)}/${i}`),content,createdAt:s('createdAt'),updatedAt:s('updatedAt')||release,publishedAt:release};
 }
