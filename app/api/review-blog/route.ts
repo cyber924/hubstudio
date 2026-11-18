@@ -106,13 +106,13 @@ export async function POST(request: Request) {
 자동 이미지 교체 요청 여부: ${input.autoApply === true ? "예. 부조화가 확인된 섹션은 가장 가까운 사진으로 교체하고 유사한 사진이면 그 사실을 보고함" : "아니오"}\n새 요청: ${message}`;
     let result: any;
     for (let attempt = 0; attempt < 2; attempt++) {
-      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent", {
+      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent", {
         method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt + (attempt ? "\n답변을 짧게 작성하고 완전한 JSON을 반환하세요." : "") }, ...visibleSections.flatMap((item: any) => [{ text: `현재 사진: 섹션 ${item.sectionIndex}, ${item.heading}, ID ${item.id}` }, { inlineData: visualMap.get(item.id) }])] }], generationConfig: { responseMimeType: "application/json", responseSchema: reviewSchema, temperature: 0.2, maxOutputTokens: 8192 } }),
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt + (attempt ? "\n답변을 짧게 작성하고 완전한 JSON을 반환하세요." : "") }, ...visibleSections.flatMap((item: any) => [{ text: `현재 사진: 섹션 ${item.sectionIndex}, ${item.heading}, ID ${item.id}` }, { inlineData: visualMap.get(item.id) }])] }], generationConfig: { responseMimeType: "application/json", responseSchema: reviewSchema, maxOutputTokens: 8192 } }),
       });
       const data = await response.json() as any;
       if (!response.ok) return Response.json({ error: data?.error?.message ?? "검수 요청에 실패했습니다." }, { status: 502 });
-      const raw = data?.candidates?.[0]?.content?.parts?.map((part: any) => part.text ?? "").join("") ?? "";
+      const raw = data?.candidates?.[0]?.content?.parts?.filter((part: any) => !part.thought).map((part: any) => part.text ?? "").join("") ?? "";
       try { result = JSON.parse(raw); if (!result || typeof result !== "object" || !Array.isArray(result.issues)) throw new Error("Incomplete result"); break; }
       catch { if (attempt === 1) return Response.json({ error: "검수 답변이 완성되지 않았습니다. 다시 요청해주세요." }, { status: 502 }); }
     }

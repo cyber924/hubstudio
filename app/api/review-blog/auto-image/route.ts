@@ -77,13 +77,13 @@ export async function POST(request: Request) {
       if (current?.inline) parts.push({ text: `기존 사진 ${current.id}` }, { inlineData: current.inline });
       for (const candidate of group) parts.push({ text: `후보 사진 ${candidate.id}` }, { inlineData: candidate.inline });
       try {
-        const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent", {
+        const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent", {
           method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-          body: JSON.stringify({ contents: [{ parts }], generationConfig: { responseMimeType: "application/json", responseSchema: choiceSchema, temperature: 0.1, maxOutputTokens: 1200 } }),
+          body: JSON.stringify({ contents: [{ parts }], generationConfig: { responseMimeType: "application/json", responseSchema: choiceSchema, maxOutputTokens: 1200 } }),
         });
         if (!response.ok) continue;
         const data = await response.json() as any;
-        const choice = JSON.parse(data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "");
+        const choice = JSON.parse(data?.candidates?.[0]?.content?.parts?.filter((p: any) => !p.thought).map((p: any) => p.text ?? "").join("") ?? "");
         const candidate = group.find(item => item.id === choice.candidateId);
         if (candidate) {
           const score = Math.max(0, Math.min(100, Number(choice.score) || 0));
@@ -99,13 +99,13 @@ export async function POST(request: Request) {
       const parts: any[] = [{ text: `아래 사진 중 이 글의 섹션에 가장 가까운 사진을 반드시 한 장 선택하세요. 실제 픽셀을 기준으로 비교하세요. 완벽히 맞지 않으면 approximate로 표시하세요. score는 0~100입니다. JSON만 반환하세요.\n글: ${documentField(fields, "title").slice(0, 200)}\n섹션: ${String(section.heading).slice(0, 200)}\n본문: ${String(section.body).slice(0, 1800)}` }];
       for (const finalist of finalists) parts.push({ text: `후보 ${finalist.candidate.id}: ${finalist.candidate.title}` }, { inlineData: finalist.candidate.inline });
       try {
-        const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent", {
+        const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent", {
           method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-          body: JSON.stringify({ contents: [{ parts }], generationConfig: { responseMimeType: "application/json", responseSchema: choiceSchema, temperature: 0.1, maxOutputTokens: 1200 } }),
+          body: JSON.stringify({ contents: [{ parts }], generationConfig: { responseMimeType: "application/json", responseSchema: choiceSchema, maxOutputTokens: 1200 } }),
         });
         if (response.ok) {
           const data = await response.json() as any;
-          const decision = JSON.parse(data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "");
+          const decision = JSON.parse(data?.candidates?.[0]?.content?.parts?.filter((p: any) => !p.thought).map((p: any) => p.text ?? "").join("") ?? "");
           const selectedFinalist = finalists.find(item => item.candidate.id === decision.candidateId);
           if (selectedFinalist) {
             const score = Math.max(0, Math.min(100, Number(decision.score) || 0));
